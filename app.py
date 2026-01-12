@@ -2,34 +2,38 @@ import streamlit as st
 import sqlite3
 import pandas as pd
 import time
+import random
 from datetime import datetime
 
 # --- 1. Configuração da Página ---
-st.set_page_config(page_title="Tracker Pós-Cirúrgico", page_icon="👁️", layout="centered")
+st.set_page_config(page_title="Tracker Feynman", page_icon="🎓", layout="centered")
 
-# --- 2. Configuração do Banco de Dados (SQLite) ---
+# --- 2. Banco de Dados (Com campo para o Método Feynman) ---
 def init_db():
     conn = sqlite3.connect('estudos.db')
     c = conn.cursor()
-    # Cria tabela se não existir
+    # Adicionamos a coluna 'feynman_explicacao'
     c.execute('''
         CREATE TABLE IF NOT EXISTS historico (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             data TEXT,
             materia TEXT,
             energia INTEGER,
-            notas TEXT
+            tipo_estudo TEXT,
+            feynman_explicacao TEXT
         )
     ''')
     conn.commit()
     conn.close()
 
-def salvar_no_bd(materia, energia, notas):
+def salvar_no_bd(materia, energia, tipo, explicacao):
     conn = sqlite3.connect('estudos.db')
     c = conn.cursor()
     data_hora = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    c.execute('INSERT INTO historico (data, materia, energia, notas) VALUES (?, ?, ?, ?)',
-              (data_hora, materia, energia, notas))
+    c.execute('''
+        INSERT INTO historico (data, materia, energia, tipo_estudo, feynman_explicacao) 
+        VALUES (?, ?, ?, ?, ?)
+    ''', (data_hora, materia, energia, tipo, explicacao))
     conn.commit()
     conn.close()
 
@@ -39,123 +43,107 @@ def ler_bd():
     conn.close()
     return df
 
-# Inicializa o banco ao abrir
 init_db()
 
-# --- 3. Estilos CSS (Modo Escuro e Fontes Grandes) ---
+# --- 3. CSS para Acessibilidade Visual ---
 st.markdown("""
     <style>
-    /* Aumentar fonte do timer */
-    .big-timer {
-        font-size: 80px !important;
-        font-weight: bold;
-        color: #00ff88;
-        text-align: center;
-        margin-bottom: 0px;
-    }
-    .status-text {
-        font-size: 20px;
-        color: #888;
-        text-align: center;
-        margin-bottom: 20px;
-    }
-    /* Botões grandes */
-    .stButton button {
-        height: 3em;
-        width: 100%;
-        font-size: 20px;
-    }
+    .big-timer { font-size: 80px !important; font-weight: bold; color: #00ff88; text-align: center; }
+    .status-text { font-size: 24px; color: #ccc; text-align: center; margin-bottom: 20px; }
+    .feynman-box { border: 2px solid #00ff88; padding: 20px; border-radius: 10px; background-color: #111; }
+    .stTextArea textarea { font-size: 18px !important; line-height: 1.5; }
     </style>
     """, unsafe_allow_html=True)
 
-# --- 4. Lógica do Timer ---
-if 'tempo_restante' not in st.session_state:
-    st.session_state.tempo_restante = 20 * 60  # 20 minutos
-if 'rodando' not in st.session_state:
-    st.session_state.rodando = False
-if 'modo' not in st.session_state:
-    st.session_state.modo = "FOCO"  # ou DESCANSO
+# --- 4. Lógica do Timer e Estado ---
+if 'tempo_restante' not in st.session_state: st.session_state.tempo_restante = 20 * 60
+if 'rodando' not in st.session_state: st.session_state.rodando = False
+if 'modo' not in st.session_state: st.session_state.modo = "ABSORÇÃO (Input)"
 
-st.title("👁️ Tracker de Recuperação")
+# --- Interface Principal ---
+st.title("🎓 Tracker Feynman: Áudio & Fala")
 
-# Container do Timer
-placeholder = st.empty()
-btn_col1, btn_col2 = st.columns(2)
+# Timer Grande
+col_timer, col_ctrl = st.columns([2, 1])
+with col_timer:
+    mins, secs = divmod(st.session_state.tempo_restante, 60)
+    cor = "#00ff88" if "ABSORÇÃO" in st.session_state.modo else "#ffcc00" # Amarelo para Feynman
+    st.markdown(f"<div class='big-timer' style='color:{cor}'>{mins:02d}:{secs:02d}</div>", unsafe_allow_html=True)
+    st.markdown(f"<div class='status-text'>{st.session_state.modo}</div>", unsafe_allow_html=True)
 
-# Botão Iniciar/Pausar
-with btn_col1:
-    label_btn = "⏸️ PAUSAR" if st.session_state.rodando else "▶️ INICIAR"
-    if st.button(label_btn):
+with col_ctrl:
+    st.write("##") # Espaçamento
+    if st.button("⏯️ INICIAR / PAUSAR", use_container_width=True):
         st.session_state.rodando = not st.session_state.rodando
-
-# Botão Alternar Modo
-with btn_col2:
-    novo_modo = "👁️ DESCANSO" if st.session_state.modo == "FOCO" else "🧠 FOCO"
-    if st.button(f"Mudar para {novo_modo}"):
-        st.session_state.modo = "DESCANSO" if st.session_state.modo == "FOCO" else "FOCO"
+    
+    # Botão para alternar fases da técnica Feynman
+    if st.button("🔄 TROCAR FASE", use_container_width=True):
+        fases = ["🎧 ABSORÇÃO (Ouvir)", "🗣️ FEYNMAN (Explicar)", "👁️ DESCANSO"]
+        atual = st.session_state.modo
+        # Lógica simples de ciclo
+        if "ABSORÇÃO" in atual: st.session_state.modo = fases[1]
+        elif "FEYNMAN" in atual: st.session_state.modo = fases[2]
+        else: st.session_state.modo = fases[0]
+        
         st.session_state.tempo_restante = 20 * 60
         st.session_state.rodando = False
         st.rerun()
 
-# Loop do Timer
-while st.session_state.rodando and st.session_state.tempo_restante > 0:
-    mins, secs = divmod(st.session_state.tempo_restante, 60)
-    timer_fmt = f"{mins:02d}:{secs:02d}"
-    
-    # Atualiza visualização
-    cor = "#00ff88" if st.session_state.modo == "FOCO" else "#00d2ff"
-    msg = "MODO ESTUDO" if st.session_state.modo == "FOCO" else "DESCANSO VISUAL (Olhe longe)"
-    
-    placeholder.markdown(f"""
-        <div class='big-timer' style='color:{cor}'>{timer_fmt}</div>
-        <div class='status-text'>{msg}</div>
-        """, unsafe_allow_html=True)
-    
+# Lógica de contagem
+if st.session_state.rodando and st.session_state.tempo_restante > 0:
     time.sleep(1)
     st.session_state.tempo_restante -= 1
-    
-    # Se chegar a zero
-    if st.session_state.tempo_restante == 0:
-        st.session_state.rodando = False
-        st.balloons()
-        st.rerun()
+    st.rerun()
+elif st.session_state.rodando and st.session_state.tempo_restante == 0:
+    st.balloons()
+    st.session_state.rodando = False
 
-# Mostra timer parado se não estiver rodando
-if not st.session_state.rodando:
-    mins, secs = divmod(st.session_state.tempo_restante, 60)
-    timer_fmt = f"{mins:02d}:{secs:02d}"
-    cor = "#00ff88" if st.session_state.modo == "FOCO" else "#00d2ff"
-    msg = "PAUSADO"
-    placeholder.markdown(f"""
-        <div class='big-timer' style='color:{cor}'>{timer_fmt}</div>
-        <div class='status-text'>{msg}</div>
-        """, unsafe_allow_html=True)
-
-# --- 5. Área de Registro (SQLite) ---
+# --- 5. O Módulo Feynman (Aparece sempre, mas destaque na fase de explicação) ---
 st.divider()
-st.subheader("📝 Registrar Bloco")
 
-with st.form("log_form"):
+if "FEYNMAN" in st.session_state.modo:
+    st.markdown("<div class='feynman-box'>", unsafe_allow_html=True)
+    st.subheader("🗣️ Momento da Aula (Ditado)")
+    
+    # Prompts aleatórios para estimular a explicação
+    prompts = [
+        "Como você explicaria isso para sua avó?",
+        "Explique isso sem usar as palavras técnicas principais.",
+        "Crie uma analogia com algo do cotidiano (comida, trânsito, futebol).",
+        "Onde um aluno iniciante ficaria confuso aqui?"
+    ]
+    if 'prompt_atual' not in st.session_state:
+        st.session_state.prompt_atual = random.choice(prompts)
+    
+    st.info(f"💡 **Desafio:** {st.session_state.prompt_atual}")
+    if st.button("🎲 Novo Desafio"):
+        st.session_state.prompt_atual = random.choice(prompts)
+    
+    st.markdown("</div>", unsafe_allow_html=True)
+
+# --- 6. Formulário de Registro Unificado ---
+with st.form("log_feynman"):
+    st.write("### 📝 Registrar Ciclo")
     c1, c2 = st.columns(2)
-    materia = c1.text_input("Matéria")
-    energia = c2.slider("Nível Energia (Pós-Bupropiona)", 1, 5, 3)
-    notas = st.text_area("Notas rápidas")
+    materia = c1.text_input("Tópico Estudado")
+    energia = c2.slider("Energia", 1, 5, 3)
     
-    if st.form_submit_button("Salvar no Banco de Dados"):
-        salvar_no_bd(materia, energia, notas)
-        st.success("Salvo com sucesso!")
-        time.sleep(1)
-        st.rerun()
+    # Campo principal para a técnica
+    explicacao = st.text_area(
+        "Sua Explicação Simplificada (Use o Ditado)", 
+        height=150,
+        placeholder="Clique no microfone do teclado e comece a falar: 'Basicamente, este conceito funciona como...'"
+    )
+    
+    if st.form_submit_button("Salvar no Histórico"):
+        salvar_no_bd(materia, energia, st.session_state.modo, explicacao)
+        st.success("Progresso registrado!")
 
-# --- 6. Histórico ---
-st.divider()
-st.subheader("📊 Histórico Salvo")
-df = ler_bd()
-if not df.empty:
-    st.dataframe(df, use_container_width=True)
-    
-    # Botão para baixar CSV (Backup)
-    csv = df.to_csv(index=False).encode('utf-8')
-    st.download_button("📥 Baixar Backup CSV", csv, "historico.csv", "text/csv")
-else:
-    st.info("Nenhum registro no banco de dados ainda.")
+# --- 7. Visualização Rápida ---
+with st.expander("📚 Ver Explicações Anteriores"):
+    df = ler_bd()
+    if not df.empty:
+        for index, row in df.iterrows():
+            st.markdown(f"**{row['data']} - {row['materia']}** (Energia: {row['energia']})")
+            st.info(f"🗣️ *{row['feynman_explicacao']}*")
+            st.write("---")
