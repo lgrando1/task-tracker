@@ -3,16 +3,20 @@ import sqlite3
 import pandas as pd
 import time
 import random
+import os
 from datetime import datetime
 
 # --- 1. Configuração da Página ---
 st.set_page_config(page_title="Tracker Feynman", page_icon="🎓", layout="centered")
 
-# --- 2. Banco de Dados (Com campo para o Método Feynman) ---
+# NOME DO ARQUIVO DO BANCO DE DADOS (Mudamos o nome para forçar criação de um novo)
+DB_FILE = 'feynman_v2.db'
+
+# --- 2. Banco de Dados ---
 def init_db():
-    conn = sqlite3.connect('estudos.db')
+    conn = sqlite3.connect(DB_FILE)
     c = conn.cursor()
-    # Adicionamos a coluna 'feynman_explicacao'
+    # Cria tabela com a estrutura nova
     c.execute('''
         CREATE TABLE IF NOT EXISTS historico (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -27,22 +31,30 @@ def init_db():
     conn.close()
 
 def salvar_no_bd(materia, energia, tipo, explicacao):
-    conn = sqlite3.connect('estudos.db')
-    c = conn.cursor()
-    data_hora = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    c.execute('''
-        INSERT INTO historico (data, materia, energia, tipo_estudo, feynman_explicacao) 
-        VALUES (?, ?, ?, ?, ?)
-    ''', (data_hora, materia, energia, tipo, explicacao))
-    conn.commit()
-    conn.close()
+    try:
+        conn = sqlite3.connect(DB_FILE)
+        c = conn.cursor()
+        data_hora = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        c.execute('''
+            INSERT INTO historico (data, materia, energia, tipo_estudo, feynman_explicacao) 
+            VALUES (?, ?, ?, ?, ?)
+        ''', (data_hora, materia, energia, tipo, explicacao))
+        conn.commit()
+        conn.close()
+        return True
+    except Exception as e:
+        st.error(f"Erro ao salvar: {e}")
+        return False
 
 def ler_bd():
-    conn = sqlite3.connect('estudos.db')
+    if not os.path.exists(DB_FILE):
+        return pd.DataFrame()
+    conn = sqlite3.connect(DB_FILE)
     df = pd.read_sql_query("SELECT * FROM historico ORDER BY id DESC", conn)
     conn.close()
     return df
 
+# Inicializa o banco
 init_db()
 
 # --- 3. CSS para Acessibilidade Visual ---
@@ -55,7 +67,20 @@ st.markdown("""
     </style>
     """, unsafe_allow_html=True)
 
-# --- 4. Lógica do Timer e Estado ---
+# --- 4. Sidebar (Controle de Emergência) ---
+with st.sidebar:
+    st.header("⚙️ Configurações")
+    st.info("Se o app der erro de banco de dados, clique abaixo para resetar.")
+    if st.button("⚠️ DELETAR BANCO DE DADOS"):
+        if os.path.exists(DB_FILE):
+            os.remove(DB_FILE)
+            st.warning("Banco deletado! Recarregue a página.")
+            time.sleep(2)
+            st.rerun()
+        else:
+            st.write("Nenhum banco encontrado.")
+
+# --- 5. Lógica do Timer e Estado ---
 if 'tempo_restante' not in st.session_state: st.session_state.tempo_restante = 20 * 60
 if 'rodando' not in st.session_state: st.session_state.rodando = False
 if 'modo' not in st.session_state: st.session_state.modo = "ABSORÇÃO (Input)"
@@ -98,18 +123,17 @@ elif st.session_state.rodando and st.session_state.tempo_restante == 0:
     st.balloons()
     st.session_state.rodando = False
 
-# --- 5. O Módulo Feynman (Aparece sempre, mas destaque na fase de explicação) ---
+# --- 6. O Módulo Feynman ---
 st.divider()
 
 if "FEYNMAN" in st.session_state.modo:
     st.markdown("<div class='feynman-box'>", unsafe_allow_html=True)
     st.subheader("🗣️ Momento da Aula (Ditado)")
     
-    # Prompts aleatórios para estimular a explicação
     prompts = [
         "Como você explicaria isso para sua avó?",
         "Explique isso sem usar as palavras técnicas principais.",
-        "Crie uma analogia com algo do cotidiano (comida, trânsito, futebol).",
+        "Crie uma analogia com algo do cotidiano.",
         "Onde um aluno iniciante ficaria confuso aqui?"
     ]
     if 'prompt_atual' not in st.session_state:
@@ -121,7 +145,7 @@ if "FEYNMAN" in st.session_state.modo:
     
     st.markdown("</div>", unsafe_allow_html=True)
 
-# --- 6. Formulário de Registro Unificado ---
+# --- 7. Formulário de Registro Unificado ---
 with st.form("log_feynman"):
     st.write("### 📝 Registrar Ciclo")
     c1, c2 = st.columns(2)
@@ -132,17 +156,23 @@ with st.form("log_feynman"):
     explicacao = st.text_area(
         "Sua Explicação Simplificada (Use o Ditado)", 
         height=150,
-        placeholder="Clique no microfone do teclado e comece a falar: 'Basicamente, este conceito funciona como...'"
+        placeholder="Clique no microfone do teclado e comece a falar..."
     )
     
     if st.form_submit_button("Salvar no Histórico"):
-        salvar_no_bd(materia, energia, st.session_state.modo, explicacao)
-        st.success("Progresso registrado!")
+        if salvar_no_bd(materia, energia, st.session_state.modo, explicacao):
+            st.success("Progresso registrado!")
+            time.sleep(1)
+            st.rerun()
 
-# --- 7. Visualização Rápida ---
+# --- 8. Visualização Rápida ---
 with st.expander("📚 Ver Explicações Anteriores"):
     df = ler_bd()
     if not df.empty:
+        # Botão de download
+        csv = df.to_csv(index=False).encode('utf-8')
+        st.download_button("📥 Baixar tudo (CSV)", csv, "feynman_backup.csv", "text/csv")
+        
         for index, row in df.iterrows():
             st.markdown(f"**{row['data']} - {row['materia']}** (Energia: {row['energia']})")
             st.info(f"🗣️ *{row['feynman_explicacao']}*")
