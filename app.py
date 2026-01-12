@@ -1,292 +1,161 @@
-<!DOCTYPE html>
-<html lang="pt-BR">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Tracker de Recuperação</title>
+import streamlit as st
+import sqlite3
+import pandas as pd
+import time
+from datetime import datetime
+
+# --- 1. Configuração da Página ---
+st.set_page_config(page_title="Tracker Pós-Cirúrgico", page_icon="👁️", layout="centered")
+
+# --- 2. Configuração do Banco de Dados (SQLite) ---
+def init_db():
+    conn = sqlite3.connect('estudos.db')
+    c = conn.cursor()
+    # Cria tabela se não existir
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS historico (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            data TEXT,
+            materia TEXT,
+            energia INTEGER,
+            notas TEXT
+        )
+    ''')
+    conn.commit()
+    conn.close()
+
+def salvar_no_bd(materia, energia, notas):
+    conn = sqlite3.connect('estudos.db')
+    c = conn.cursor()
+    data_hora = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    c.execute('INSERT INTO historico (data, materia, energia, notas) VALUES (?, ?, ?, ?)',
+              (data_hora, materia, energia, notas))
+    conn.commit()
+    conn.close()
+
+def ler_bd():
+    conn = sqlite3.connect('estudos.db')
+    df = pd.read_sql_query("SELECT * FROM historico ORDER BY id DESC", conn)
+    conn.close()
+    return df
+
+# Inicializa o banco ao abrir
+init_db()
+
+# --- 3. Estilos CSS (Modo Escuro e Fontes Grandes) ---
+st.markdown("""
     <style>
-        :root {
-            --bg-color: #000000;
-            --text-color: #e0e0e0;
-            --accent-green: #00ff88;
-            --accent-red: #ff4d4d;
-            --card-bg: #1a1a1a;
-        }
-
-        body {
-            background-color: var(--bg-color);
-            color: var(--text-color);
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            min-height: 100vh;
-            margin: 0;
-            padding: 20px;
-        }
-
-        /* --- Tipografia Grande para Visão --- */
-        h1 { font-size: 1.5rem; opacity: 0.8; }
-        
-        .timer-display {
-            font-size: 6rem;
-            font-weight: bold;
-            font-variant-numeric: tabular-nums;
-            margin: 20px 0;
-            color: var(--accent-green);
-            text-shadow: 0 0 10px rgba(0, 255, 136, 0.3);
-        }
-
-        /* --- Botões Grandes e Acessíveis --- */
-        .controls {
-            display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 20px;
-            width: 100%;
-            max-width: 400px;
-        }
-
-        button {
-            padding: 20px;
-            font-size: 1.2rem;
-            border: none;
-            border-radius: 12px;
-            cursor: pointer;
-            transition: transform 0.1s;
-            font-weight: bold;
-        }
-
-        .btn-start { background-color: var(--accent-green); color: #000; }
-        .btn-stop { background-color: var(--accent-red); color: #fff; }
-        .btn-mode { background-color: #333; color: #fff; grid-column: span 2; }
-        
-        button:active { transform: scale(0.98); }
-
-        /* --- Formulário de Registro --- */
-        .log-section {
-            background-color: var(--card-bg);
-            padding: 20px;
-            border-radius: 15px;
-            width: 100%;
-            max-width: 400px;
-            margin-top: 30px;
-            display: none; /* Escondido até parar o timer */
-        }
-
-        input, select, textarea {
-            width: 100%;
-            padding: 15px;
-            margin-bottom: 15px;
-            background: #333;
-            border: 1px solid #444;
-            color: white;
-            font-size: 1rem;
-            border-radius: 8px;
-            box-sizing: border-box;
-        }
-
-        label { display: block; margin-bottom: 5px; color: #aaa; }
-
-        /* --- Histórico --- */
-        .history-section {
-            width: 100%;
-            max-width: 400px;
-            margin-top: 40px;
-        }
-        .history-item {
-            border-bottom: 1px solid #333;
-            padding: 10px 0;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-        }
-        .energy-tag {
-            background: #333;
-            padding: 4px 8px;
-            border-radius: 4px;
-            font-size: 0.8rem;
-        }
+    /* Aumentar fonte do timer */
+    .big-timer {
+        font-size: 80px !important;
+        font-weight: bold;
+        color: #00ff88;
+        text-align: center;
+        margin-bottom: 0px;
+    }
+    .status-text {
+        font-size: 20px;
+        color: #888;
+        text-align: center;
+        margin-bottom: 20px;
+    }
+    /* Botões grandes */
+    .stButton button {
+        height: 3em;
+        width: 100%;
+        font-size: 20px;
+    }
     </style>
-</head>
-<body>
+    """, unsafe_allow_html=True)
 
-    <h1>Monitor de Energia</h1>
+# --- 4. Lógica do Timer ---
+if 'tempo_restante' not in st.session_state:
+    st.session_state.tempo_restante = 20 * 60  # 20 minutos
+if 'rodando' not in st.session_state:
+    st.session_state.rodando = False
+if 'modo' not in st.session_state:
+    st.session_state.modo = "FOCO"  # ou DESCANSO
 
-    <div id="timer" class="timer-display">20:00</div>
-    <div id="status-text" style="color: #888; margin-bottom: 10px;">MODO FOCO</div>
+st.title("👁️ Tracker de Recuperação")
 
-    <div class="controls">
-        <button id="btn-toggle" class="btn-start" onclick="toggleTimer()">INICIAR</button>
-        <button class="btn-mode" onclick="switchMode()">Alternar para Descanso (20min)</button>
-    </div>
+# Container do Timer
+placeholder = st.empty()
+btn_col1, btn_col2 = st.columns(2)
 
-    <div id="log-section" class="log-section">
-        <h3>📝 Registrar Sessão</h3>
-        
-        <label>Matéria / Atividade</label>
-        <input type="text" id="subject" placeholder="Ex: Planejamento Aulas">
+# Botão Iniciar/Pausar
+with btn_col1:
+    label_btn = "⏸️ PAUSAR" if st.session_state.rodando else "▶️ INICIAR"
+    if st.button(label_btn):
+        st.session_state.rodando = not st.session_state.rodando
 
-        <label>Nível de Energia (1 = Baixo, 5 = Alto)</label>
-        <select id="energy">
-            <option value="5">5 - Alta (Pico)</option>
-            <option value="4">4 - Boa</option>
-            <option value="3">3 - Média</option>
-            <option value="2">2 - Baixa</option>
-            <option value="1">1 - Exausto</option>
-        </select>
+# Botão Alternar Modo
+with btn_col2:
+    novo_modo = "👁️ DESCANSO" if st.session_state.modo == "FOCO" else "🧠 FOCO"
+    if st.button(f"Mudar para {novo_modo}"):
+        st.session_state.modo = "DESCANSO" if st.session_state.modo == "FOCO" else "FOCO"
+        st.session_state.tempo_restante = 20 * 60
+        st.session_state.rodando = False
+        st.rerun()
 
-        <label>Notas (Opcional)</label>
-        <textarea id="notes" rows="3"></textarea>
+# Loop do Timer
+while st.session_state.rodando and st.session_state.tempo_restante > 0:
+    mins, secs = divmod(st.session_state.tempo_restante, 60)
+    timer_fmt = f"{mins:02d}:{secs:02d}"
+    
+    # Atualiza visualização
+    cor = "#00ff88" if st.session_state.modo == "FOCO" else "#00d2ff"
+    msg = "MODO ESTUDO" if st.session_state.modo == "FOCO" else "DESCANSO VISUAL (Olhe longe)"
+    
+    placeholder.markdown(f"""
+        <div class='big-timer' style='color:{cor}'>{timer_fmt}</div>
+        <div class='status-text'>{msg}</div>
+        """, unsafe_allow_html=True)
+    
+    time.sleep(1)
+    st.session_state.tempo_restante -= 1
+    
+    # Se chegar a zero
+    if st.session_state.tempo_restante == 0:
+        st.session_state.rodando = False
+        st.balloons()
+        st.rerun()
 
-        <button class="btn-start" onclick="saveLog()" style="width:100%">Salvar Registro</button>
-    </div>
+# Mostra timer parado se não estiver rodando
+if not st.session_state.rodando:
+    mins, secs = divmod(st.session_state.tempo_restante, 60)
+    timer_fmt = f"{mins:02d}:{secs:02d}"
+    cor = "#00ff88" if st.session_state.modo == "FOCO" else "#00d2ff"
+    msg = "PAUSADO"
+    placeholder.markdown(f"""
+        <div class='big-timer' style='color:{cor}'>{timer_fmt}</div>
+        <div class='status-text'>{msg}</div>
+        """, unsafe_allow_html=True)
 
-    <div class="history-section">
-        <h3>Histórico Recente <button onclick="downloadCSV()" style="font-size:0.8rem; padding:5px 10px; margin-left:10px; background:#333;">Baixar CSV</button></h3>
-        <div id="history-list"></div>
-    </div>
+# --- 5. Área de Registro (SQLite) ---
+st.divider()
+st.subheader("📝 Registrar Bloco")
 
-    <audio id="alarm-sound" src="https://actions.google.com/sounds/v1/alarms/beep_short.ogg"></audio>
+with st.form("log_form"):
+    c1, c2 = st.columns(2)
+    materia = c1.text_input("Matéria")
+    energia = c2.slider("Nível Energia (Pós-Bupropiona)", 1, 5, 3)
+    notas = st.text_area("Notas rápidas")
+    
+    if st.form_submit_button("Salvar no Banco de Dados"):
+        salvar_no_bd(materia, energia, notas)
+        st.success("Salvo com sucesso!")
+        time.sleep(1)
+        st.rerun()
 
-    <script>
-        let timeLeft = 20 * 60;
-        let isRunning = false;
-        let timerId = null;
-        let mode = "FOCO"; // ou DESCANSO
-
-        // Elementos
-        const display = document.getElementById('timer');
-        const btnToggle = document.getElementById('btn-toggle');
-        const statusText = document.getElementById('status-text');
-        const logSection = document.getElementById('log-section');
-        const historyList = document.getElementById('history-list');
-        const alarm = document.getElementById('alarm-sound');
-
-        // Carregar dados ao iniciar
-        let studyData = JSON.parse(localStorage.getItem('studyTrackerData')) || [];
-        renderHistory();
-
-        function updateDisplay() {
-            const m = Math.floor(timeLeft / 60);
-            const s = timeLeft % 60;
-            display.textContent = `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
-        }
-
-        function toggleTimer() {
-            if (isRunning) {
-                // Parar
-                clearInterval(timerId);
-                isRunning = false;
-                btnToggle.textContent = "RETOMAR";
-                btnToggle.className = "btn-start";
-                
-                // Se for modo foco, mostra o log
-                if (mode === "FOCO") {
-                    logSection.style.display = "block";
-                    window.scrollTo(0, document.body.scrollHeight);
-                }
-            } else {
-                // Iniciar
-                logSection.style.display = "none";
-                isRunning = true;
-                btnToggle.textContent = "PAUSAR";
-                btnToggle.className = "btn-stop";
-                
-                timerId = setInterval(() => {
-                    if (timeLeft > 0) {
-                        timeLeft--;
-                        updateDisplay();
-                    } else {
-                        finishTimer();
-                    }
-                }, 1000);
-            }
-        }
-
-        function finishTimer() {
-            clearInterval(timerId);
-            isRunning = false;
-            btnToggle.textContent = "INICIAR";
-            btnToggle.className = "btn-start";
-            alarm.play();
-            alert("⏰ Tempo Esgotado!");
-            if (mode === "FOCO") {
-                logSection.style.display = "block";
-            }
-        }
-
-        function switchMode() {
-            clearInterval(timerId);
-            isRunning = false;
-            btnToggle.textContent = "INICIAR";
-            
-            if (mode === "FOCO") {
-                mode = "DESCANSO";
-                timeLeft = 20 * 60; // 20 min descanso
-                document.documentElement.style.setProperty('--accent-green', '#00d2ff'); // Azul para descanso
-                statusText.textContent = "MODO DESCANSO (Olhe longe das telas)";
-            } else {
-                mode = "FOCO";
-                timeLeft = 20 * 60; // 20 min foco
-                document.documentElement.style.setProperty('--accent-green', '#00ff88'); // Verde para foco
-                statusText.textContent = "MODO FOCO";
-            }
-            updateDisplay();
-            logSection.style.display = "none";
-        }
-
-        function saveLog() {
-            const subject = document.getElementById('subject').value;
-            const energy = document.getElementById('energy').value;
-            const notes = document.getElementById('notes').value;
-
-            const entry = {
-                date: new Date().toLocaleString(),
-                subject,
-                energy,
-                notes,
-                duration: "20 min" // Simplificado para blocos fixos
-            };
-
-            studyData.unshift(entry); // Adiciona no começo
-            localStorage.setItem('studyTrackerData', JSON.stringify(studyData));
-            
-            // Limpa form
-            document.getElementById('subject').value = "";
-            document.getElementById('notes').value = "";
-            logSection.style.display = "none";
-            
-            renderHistory();
-        }
-
-        function renderHistory() {
-            historyList.innerHTML = "";
-            studyData.slice(0, 5).forEach(item => { // Mostra só os últimos 5
-                const div = document.createElement('div');
-                div.className = "history-item";
-                div.innerHTML = `
-                    <div>
-                        <div style="font-weight:bold">${item.subject || "Estudo Geral"}</div>
-                        <div style="font-size:0.8rem; color:#888">${item.date}</div>
-                    </div>
-                    <div class="energy-tag">⚡ ${item.energy}/5</div>
-                `;
-                historyList.appendChild(div);
-            });
-        }
-
-        function downloadCSV() {
-            let csvContent = "data:text/csv;charset=utf-8,Data,Materia,Energia,Notas\n";
-            studyData.forEach(row => {
-                csvContent += `${row.date},${row.subject},${row.energy},"${row.notes}"\n`;
-            });
-            const encodedUri = encodeURI(csvContent);
-            const link = document.createElement("a");
-            link.setAttribute("href", encodedUri);
-            link.setAttribute("download", "historico_estudos.csv");
-            document.body.appendChild(link);
-            link.click();
-        }
-    </script>
-</body>
-</html>
+# --- 6. Histórico ---
+st.divider()
+st.subheader("📊 Histórico Salvo")
+df = ler_bd()
+if not df.empty:
+    st.dataframe(df, use_container_width=True)
+    
+    # Botão para baixar CSV (Backup)
+    csv = df.to_csv(index=False).encode('utf-8')
+    st.download_button("📥 Baixar Backup CSV", csv, "historico.csv", "text/csv")
+else:
+    st.info("Nenhum registro no banco de dados ainda.")
